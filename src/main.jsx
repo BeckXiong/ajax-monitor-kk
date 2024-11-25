@@ -374,7 +374,7 @@ let ajax_interceptor_qoweifjqon = {
 console.log('main.js')
 
 window.addEventListener("message", function (event) {
-  console.log('event', event)
+
   const data = event.data
   // console.log('data from content_script main.js', data)
 
