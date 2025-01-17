@@ -636,7 +636,7 @@ const App = () => {
               }} />}
               onClick={() => handleExportRules()}
             />
-            <a href='./popup.html' target='_blank'>open popup</a>
+            {/* <a href='./popup.html' target='_blank'>open popup</a> */}
             <Upload {...uploadProps}>
               <Button
                 type="primary"

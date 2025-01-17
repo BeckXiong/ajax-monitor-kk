@@ -17,12 +17,16 @@ import {
   Divider,
   message,
   Upload,
+  Table,
+  Drawer,
+  Typography,
+  Spin,
 } from 'antd';
-import { MinusOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons';
+import { MinusOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, ExportOutlined, CopyOutlined } from '@ant-design/icons';
 import MonacoEditor from './components/Editor/index'
 import JSONPretty from 'react-json-pretty';
 import { FaFileExport, FaFileImport } from "react-icons/fa";
-
+import { JsonEditor } from 'json-edit-react'
 
 const { Panel } = Collapse;
 const { Option } = Select;
@@ -65,7 +69,17 @@ const App = () => {
   const [rules, setRules] = useState<AjaxInterceptorRule[]>([]);
   const [dataList, setDataList] = useState<DataList>({});
 
+  const tableBoxRef = useRef<HTMLDivElement>(null);
+
   const [isLoading, setIsLoading] = useState(true);
+  const [tableBoxHeight, setTableBoxHeight] = useState(0);
+  const [showDetail, setShowDetail] = useState(false);
+  const [currentEditRule, setCurrentEditRule] = useState<AjaxInterceptorRule | null>(null);
+  useEffect(() => {
+    if (tableBoxRef.current) {
+      setTableBoxHeight(window.innerHeight - tableBoxRef.current.offsetTop - 20);
+    }
+  }, [tableBoxRef.current]);
 
   useEffect(() => {
     chrome.storage.local.get(['ajaxInterceptor_switchOn', 'ajaxInterceptor_rules', 'customFunction'], (result) => {
@@ -132,32 +146,28 @@ const App = () => {
     action: '#',
     accept: '.json',
     beforeUpload(file) {
-      alert('beforeUpload');
-      console.log(file);
-
-      // get json database
-      const jsonDatabase = file;
-      console.log(jsonDatabase);
-      // replace rules
-      setRules(jsonDatabase);
-      // set to storage
-      set('ajaxInterceptor_rules', jsonDatabase);
-      // group rules by tab
-      groupRulesByTab();
-      return false;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const jsonDatabase = JSON.parse(e.target?.result as string);
+          setRules(jsonDatabase);
+          set('ajaxInterceptor_rules', jsonDatabase);
+          groupRulesByTab();
+          message.success(`${file.name} uploaded successfully`);
+        } catch (error) {
+          message.error('Failed to parse JSON file');
+          console.error(error);
+        }
+      };
+      reader.readAsText(file);
+      return false; // Prevent default upload behavior
     },
     onChange(info) {
       if (info.file.status !== 'uploading') {
         console.log(info.file, info.fileList);
       }
-      if (info.file.status === 'done') {
-        message.success(`${info.file.name} file uploaded successfully`);
-
-      } else if (info.file.status === 'error') {
-        message.error(`${info.file.name} file upload failed.`);
-      }
     },
-  }
+  };
 
   const handleIncomingMessage = useCallback(({
     type,
@@ -198,9 +208,11 @@ const App = () => {
     });
   };
 
-  const set = useCallback((key, value) => {
+  const set = (key, value) => {
+    setIsLoading(true);
     // First ensure we have the latest state before sending messages
     chrome.storage?.local.set({ [key]: value }, () => {
+      console.log(`[set] key: ${key}, value: ${value}`);
       chrome.runtime.sendMessage(chrome.runtime.id, {
         type: 'ajaxInterceptor',
         to: 'background',
@@ -208,7 +220,8 @@ const App = () => {
         value,
       });
     });
-  }, []);
+    setIsLoading(false);
+  };
 
   const forceUpdateDebouce = () => {
     if (forceUpdateTimeoutRef.current) {
@@ -242,7 +255,15 @@ const App = () => {
   const handleExportRules = () => {
     const rulesForExport = rules.map(rule => ({
       ...rule,
-      overrideTxt: typeof rule.overrideTxt === 'string' ? JSON.parse(rule.overrideTxt) : rule.overrideTxt,
+      overrideTxt: typeof rule.overrideTxt === 'string' ?
+        (() => {
+          try {
+            return JSON.parse(rule.overrideTxt);
+          } catch (e) {
+            return rule.overrideTxt;
+          }
+        })()
+        : rule.overrideTxt,
     }));
     const dataStr = JSON.stringify(rulesForExport, null, 2);
     const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
@@ -273,6 +294,7 @@ const App = () => {
       const newRules = prevRules.map(rule =>
         rule.id === ruleId ? { ...rule, match: value } : { ...rule }
       );
+      console.log(`[handleMatchChange] newRules:`, newRules);
       set('ajaxInterceptor_rules', newRules);
       return newRules;
     });
@@ -286,6 +308,19 @@ const App = () => {
       set('ajaxInterceptor_rules', newRules);
       return newRules;
     });
+  };
+
+  const handleAddNewRule = () => {
+    const newRule: AjaxInterceptorRule = {
+      id: generateUniqueId(),
+      match: '',
+      label: `url${rules.length + 1}`,
+      switchOn: true,
+      key: buildUUID(),
+      tabId: 'Default',
+    };
+    setCurrentEditRule(newRule);
+    setShowDetail(true);
   };
 
   const handleClickAdd = (tabId) => {
@@ -638,9 +673,9 @@ const App = () => {
               }} />}
               onClick={() => handleExportRules()}
             />
-            <a href='./popup.html' target='_blank'>open popup</a>
-              <Upload {...uploadProps}>
-                <Button
+            {/* <a href='./popup.html' target='_blank'>open popup</a> */}
+            <Upload {...uploadProps}>
+              <Button
                 type="primary"
                 icon={<FaFileImport style={{
                   marginBottom: -1
@@ -680,6 +715,241 @@ const App = () => {
   if (isLoading) {
     return <div>Loading...</div>;
   }
+
+  const handleViewDetail = (text, record) => {
+    setCurrentEditRule(record);
+    setShowDetail(true);
+  };
+
+  const tableColumns = [
+    {
+      title: "id",
+      dataIndex: "id",
+      width: '160px',
+      ellipsis: true,
+      key: "id",
+      render: (text, record) => (
+        <Tooltip title={text}>
+          <span>{text}</span>
+        </Tooltip>
+      )
+    },
+    {
+      title: "Name",
+      width: '150px',
+      dataIndex: "label",
+      key: "label",
+      ellipsis: true,
+    },
+    {
+      title: "Enable",
+      width: '120px',
+      dataIndex: "switchOn",
+      key: "switchOn",
+      render: (text, record) => (
+        <Switch
+          checked={record.switchOn}
+          onChange={() => handleSingleSwitchChange(record.switchOn, record.id)}
+        />
+      )
+    },
+    {
+      title: "match",
+      dataIndex: "match",
+      key: "match",
+      ellipsis: true,
+      render: (text, record) => (
+        <Tooltip title={text}>
+          <Button type="link" size="small" onClick={() => handleViewDetail(text, record)}>{text}</Button>
+        </Tooltip>
+      )
+    },
+    {
+      title: "Action",
+      width: '100px',
+      render: (text, record) => (
+        <Button type="text" danger onClick={() => handleClickRemove(text, record.id)} icon={<DeleteOutlined />} />
+      )
+    }
+  ]
+
+  const handleRulesChange = (data) => {
+    console.log(1);
+    if (currentEditRule) {
+      setCurrentEditRule({ ...currentEditRule, overrideTxt: JSON.stringify(data) });
+    }
+  };
+  const handleUpdateRules = () => {
+    if (currentEditRule) {
+      const index = rules.findIndex(rule => rule.id === currentEditRule.id);
+      if (index !== -1) {
+        const newRules = [...rules];
+        newRules[index] = currentEditRule;
+        setRules(newRules);
+      } else {
+        // new rule
+        setRules(prevRules => [...prevRules, currentEditRule]);
+      }
+
+      setShowDetail(false);
+    }
+  };
+
+  return (
+    <Spin spinning={isLoading}>
+      <div style={{
+        width: '100%',
+        height: '100%',
+        padding: '20px',
+        boxSizing: 'border-box',
+      }}>
+        <div style={{
+          padding: '20px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          boxSizing: 'border-box',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <div>
+            <Switch
+              checkedChildren="On"
+              unCheckedChildren="Off"
+              checked={switchOn}
+              onChange={handleSwitchChange}
+            />
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}>
+            <Input.Search
+              placeholder="Search by name"
+              onPressEnter={handleSearch}
+            />
+            <Input.Search
+              placeholder="Search by url"
+              onPressEnter={handleUrlSearch}
+            />
+            <Button type="primary" onClick={handleAddNewRule}>Add Rule</Button>
+          </div>
+        </div>
+        <div
+          ref={tableBoxRef}
+          style={{
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            height: tableBoxHeight,
+            position: 'relative',
+          }}>
+          {!switchOn && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.1)',
+              zIndex: 1,
+              cursor: 'not-allowed',
+              pointerEvents: 'none',
+            }} />
+          )}
+          <Table
+            bordered
+            style={{
+              height: tableBoxHeight,
+              opacity: switchOn ? 1 : 0.65,
+            }}
+            scroll={{ y: tableBoxHeight }}
+            size='small'
+            columns={tableColumns}
+            dataSource={rules}
+          />
+        </div>
+        <Drawer
+          maskClosable={false}
+          width={1200}
+          title="Detail"
+          open={showDetail}
+          onClose={() => {
+            setShowDetail(false);
+          }}
+          extra={
+            <Space>
+              <Button onClick={() => setShowDetail(false)}>Cancel</Button>
+              <Button type="primary" onClick={handleUpdateRules}>
+                OK
+              </Button>
+            </Space>
+          }
+        >
+          <div style={{
+            display: 'flex',
+            gap: '10px',
+          }}>
+            <div style={{
+              width: 500
+            }}>
+              <Typography.Title level={4} style={{
+                marginTop: 0
+              }}>Id:</Typography.Title>
+
+              <Space.Compact style={{
+                width: '100%',
+              }}>
+                <Input
+                  style={{
+                    marginBottom: '10px',
+                  }}
+                  disabled
+                  value={currentEditRule?.id || ''}
+                />
+                <Button  type="primary" icon={<CopyOutlined />} onClick={() => {
+                  navigator.clipboard.writeText(currentEditRule?.id || '');
+                  message.success('Copied to clipboard');
+                }}></Button>
+              </Space.Compact>
+              <Typography.Title level={4}>Label:</Typography.Title>
+              <Input
+                style={{
+                  marginBottom: '10px',
+                }}
+                value={currentEditRule?.label || ''}
+                onChange={(e) => {
+                  if (currentEditRule) {
+                    setCurrentEditRule({ ...currentEditRule, label: e.target.value });
+                  }
+                }}
+              />
+              <Typography.Title level={4}>Match:</Typography.Title>
+              <Input.TextArea
+                rows={10}
+                style={{
+                  marginBottom: '10px',
+                }}
+                value={currentEditRule?.match || ''}
+                onChange={(e) => {
+                  if (currentEditRule) {
+                    setCurrentEditRule({ ...currentEditRule, match: e.target.value });
+                  }
+                }}
+              />
+            </div>
+
+            <JsonEditor
+              rootName=''
+              className='json-editor'
+              data={JSON.parse(currentEditRule?.overrideTxt || '{}')}
+              setData={handleRulesChange}
+            />
+          </div>
+
+        </Drawer>
+      </div>
+    </Spin>
+  )
 
   return (
     <div className="ajax-modifier-main" style={{
