@@ -22,7 +22,7 @@ import {
   Typography,
   Spin,
 } from 'antd';
-import { MinusOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, ExportOutlined, CopyOutlined } from '@ant-design/icons';
+import { MinusOutlined, EditOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, ExportOutlined, CopyOutlined } from '@ant-design/icons';
 import MonacoEditor from './components/Editor/index'
 import JSONPretty from 'react-json-pretty';
 import { FaFileExport, FaFileImport } from "react-icons/fa";
@@ -77,9 +77,15 @@ const App = () => {
   const [currentEditRule, setCurrentEditRule] = useState<AjaxInterceptorRule | null>(null);
   useEffect(() => {
     if (tableBoxRef.current) {
-      setTableBoxHeight(window.innerHeight - tableBoxRef.current.offsetTop - 20);
+      setTableBoxHeight(window.innerHeight - tableBoxRef.current.offsetTop - 34);
     }
   }, [tableBoxRef.current]);
+
+  const readRulesFromStorage = () => {
+    chrome.storage.local.get(['ajaxInterceptor_rules'], (result) => {
+      setRules(result.ajaxInterceptor_rules || []);
+    });
+  };
 
   useEffect(() => {
     chrome.storage.local.get(['ajaxInterceptor_switchOn', 'ajaxInterceptor_rules', 'customFunction'], (result) => {
@@ -97,13 +103,19 @@ const App = () => {
         };
         const defaultRules = [defaultRule];
         setRules(defaultRules);
-        set('ajaxInterceptor_rules', defaultRules);
+        // set('ajaxInterceptor_rules', defaultRules);
       } else {
         setRules(result.ajaxInterceptor_rules);
       }
 
       setCustomFunction(result.customFunction || { panelPosition: 0 });
       setIsLoading(false);
+    });
+
+    window.addEventListener('resize', () => {
+      if (tableBoxRef.current) {
+        setTableBoxHeight(window.innerHeight - tableBoxRef.current.offsetTop - 34);
+      }
     });
 
     setupMessageListener();
@@ -145,15 +157,28 @@ const App = () => {
     name: 'file',
     action: '#',
     accept: '.json',
+    showUploadList: false,
     beforeUpload(file) {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const jsonDatabase = JSON.parse(e.target?.result as string);
-          setRules(jsonDatabase);
-          set('ajaxInterceptor_rules', jsonDatabase);
-          groupRulesByTab();
-          message.success(`${file.name} uploaded successfully`);
+          console.log('jsonDatabase', jsonDatabase);
+          if (jsonDatabase.length > 0) {
+            jsonDatabase.forEach(rule => {
+              try {
+                rule.overrideTxt = JSON.stringify(rule.overrideTxt);
+              } catch (error) {
+                rule.overrideTxt = '{}'
+              }
+            });
+            setRules(jsonDatabase);
+            set('ajaxInterceptor_rules', jsonDatabase);
+            groupRulesByTab();
+            message.success(`${file.name} uploaded successfully`);
+          } else {
+            message.error('Failed to parse JSON file');
+          }
         } catch (error) {
           message.error('Failed to parse JSON file');
           console.error(error);
@@ -233,6 +258,7 @@ const App = () => {
   };
 
   const handleSingleSwitchChange = (switchOn, ruleId) => {
+    console.log('handleSingleSwitchChange', switchOn, ruleId);
     setRules(prevRules => {
       const newRules = prevRules.map(rule =>
         rule.id === ruleId ? { ...rule, switchOn } : rule
@@ -274,9 +300,21 @@ const App = () => {
     linkElement.click();
   };
 
-  const handleImportRules = () => {
-    console.log('handleImportRules');
-  };
+  useEffect(() => {
+    console.log('searchName', searchName);
+    console.log('searchUrl', searchUrl);
+    if (searchName || searchUrl) {
+      setRules(prevRules => {
+        const newRules = prevRules.filter(rule => {
+          return rule.label.includes(searchName) && rule.match.includes(searchUrl);
+      });
+      console.log('newRules', newRules);
+        return newRules;
+      });
+    } else {
+      readRulesFromStorage()
+    }
+  }, [searchName, searchUrl]);
 
   const handleFilterTypeChange = (val, ruleId) => {
     setRules(prevRules => {
@@ -295,7 +333,6 @@ const App = () => {
         rule.id === ruleId ? { ...rule, match: value } : { ...rule }
       );
       console.log(`[handleMatchChange] newRules:`, newRules);
-      set('ajaxInterceptor_rules', newRules);
       return newRules;
     });
   };
@@ -305,7 +342,7 @@ const App = () => {
       const newRules = prevRules.map(rule =>
         rule.id === ruleId ? { ...rule, label: e.target.value } : rule
       );
-      set('ajaxInterceptor_rules', newRules);
+      // set('ajaxInterceptor_rules', newRules);
       return newRules;
     });
   };
@@ -335,7 +372,7 @@ const App = () => {
     setActiveKey(tabId);
     setRules(prevRules => {
       const newRules = [...prevRules, newRule];
-      set('ajaxInterceptor_rules', newRules);
+      // set('ajaxInterceptor_rules', newRules);
       return newRules;
     });
   };
@@ -433,60 +470,6 @@ const App = () => {
       // Set the activeKey to the last remaining tab, or undefined if no tabs left
       setActiveKey(remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1] : undefined);
     }
-  };
-
-  const renderTabs = () => {
-    return (
-      <Tabs
-        activeKey={activeKey}
-        size={'small'}
-        onChange={(key) => setActiveKey(key)}
-        type="editable-card"
-        items={Object.entries(dataList).map(([tabId, rules]) => {
-          const filteredRules = rules.filter(rule => searchName ? rule.label.indexOf(searchName) > -1 : true).filter(rule => searchUrl ? rule.match.indexOf(searchUrl) > -1 : true)
-
-          const newLocal = (
-            <>
-              <Collapse
-                className='collapse'
-                onChange={handleCollaseChange}
-              >
-                {renderRules(filteredRules)}
-              </Collapse>
-
-              <Button
-                size="large"
-                className='btn-add'
-                type="primary"
-                onClick={() => handleClickAdd(tabId)}
-                disabled={!switchOn}
-              >
-                <PlusOutlined />
-              </Button>
-            </>
-          );
-          return {
-            key: tabId,
-            label: (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-              }}>
-                <Badge
-                  className="site-badge-count-109"
-                  count={filteredRules.length}
-                  size={'small'}
-                  style={{ backgroundColor: '#52c41a' }}
-                />
-                &nbsp;{tabId}
-              </div>
-            ),
-            children: newLocal,
-          }
-        })}
-        onEdit={handleTabEdit}
-      />
-    );
   };
 
   const renderRules = (rules: AjaxInterceptorRule[]) => {
@@ -626,92 +609,6 @@ const App = () => {
     );
   };
 
-  const renderHeader = () => (
-    <div style={{
-      textAlign: 'center',
-      position: 'sticky',
-      top: 0,
-      zIndex: 10,
-      background: 'white',
-      paddingBottom: 10,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}>
-          <Switch
-            checked={switchOn}
-            onChange={handleSwitchChange}
-          />
-          <Space.Compact>
-
-            <Input
-              allowClear
-              onChange={(e) => {
-                setNewTabName(e.target.value);
-              }}
-              placeholder="Add new tab"
-              onPressEnter={(e) => {
-                handleClickAdd(newTabName || generateRandomString(5));
-              }}
-            />
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => handleClickAdd(newTabName || generateRandomString(5))}
-            />
-            <Button
-              type="primary"
-              icon={<FaFileExport style={{
-                marginBottom: -1
-              }} />}
-              onClick={() => handleExportRules()}
-            />
-            {/* <a href='./popup.html' target='_blank'>open popup</a> */}
-            <Upload {...uploadProps}>
-              <Button
-                type="primary"
-                icon={<FaFileImport style={{
-                  marginBottom: -1
-                }} />}
-              />
-            </Upload>
-          </Space.Compact>
-        </div>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-        }}>
-          <Input
-            style={{ marginRight: 10 }}
-            placeholder="Search by name"
-            onPressEnter={handleSearch}
-          />
-          <Input
-            style={{ marginRight: 10 }}
-            placeholder="Search by url"
-            onPressEnter={handleUrlSearch}
-          />
-          {showRefreshTip && (
-            <div style={{
-              color: '#1890ff',
-              lineHeight: '16px',
-              marginTop: '16px',
-            }}>
-              Please Refresh your page after changing rules.
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -749,7 +646,7 @@ const App = () => {
       render: (text, record) => (
         <Switch
           checked={record.switchOn}
-          onChange={() => handleSingleSwitchChange(record.switchOn, record.id)}
+          onChange={(val) => handleSingleSwitchChange(val, record.id)}
         />
       )
     },
@@ -759,7 +656,7 @@ const App = () => {
       key: "match",
       ellipsis: true,
       render: (text, record) => (
-        <Tooltip title={text}>
+        <Tooltip placement="topLeft" title={text}>
           <Button type="link" size="small" onClick={() => handleViewDetail(text, record)}>{text}</Button>
         </Tooltip>
       )
@@ -768,7 +665,10 @@ const App = () => {
       title: "Action",
       width: '100px',
       render: (text, record) => (
-        <Button type="text" danger onClick={() => handleClickRemove(text, record.id)} icon={<DeleteOutlined />} />
+        <Space>
+          <Button type="link" onClick={() => handleViewDetail(text, record)} icon={<EditOutlined />} />
+          <Button type="text" danger onClick={() => handleClickRemove(text, record.id)} icon={<DeleteOutlined />} />
+        </Space>
       )
     }
   ]
@@ -782,15 +682,15 @@ const App = () => {
   const handleUpdateRules = () => {
     if (currentEditRule) {
       const index = rules.findIndex(rule => rule.id === currentEditRule.id);
+      let newRules = [...rules];
       if (index !== -1) {
-        const newRules = [...rules];
         newRules[index] = currentEditRule;
-        setRules(newRules);
       } else {
         // new rule
-        setRules(prevRules => [...prevRules, currentEditRule]);
+        newRules.push(currentEditRule);
       }
-
+      setRules(newRules);
+      set('ajaxInterceptor_rules', newRules);
       setShowDetail(false);
     }
   };
@@ -826,14 +726,42 @@ const App = () => {
             gap: 10,
           }}>
             <Input.Search
+              style={{
+                width: 200,
+              }}
               placeholder="Search by name"
               onPressEnter={handleSearch}
             />
             <Input.Search
+              style={{
+                width: 200,
+              }}
               placeholder="Search by url"
               onPressEnter={handleUrlSearch}
             />
-            <Button type="primary" onClick={handleAddNewRule}>Add Rule</Button>
+            <Button style={{
+              width: 32,
+              height: 32,
+              borderRadius: 4,
+            }} color="primary" variant="filled" onClick={() => handleExportRules()} icon={<ExportOutlined />} />
+
+            <Upload {...uploadProps}>
+              <Button
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '4px',
+                }}
+                color="primary" variant="filled"
+                icon={<FaFileImport style={{
+                  marginBottom: -1
+                }} />}
+              />
+            </Upload>
+            <Button type="primary" onClick={handleAddNewRule}>
+              <PlusOutlined />
+              Add Rule
+            </Button>
           </div>
         </div>
         <div
@@ -858,11 +786,14 @@ const App = () => {
           )}
           <Table
             bordered
+            pagination={{
+              pageSize: 20,
+            }}
             style={{
               height: tableBoxHeight,
               opacity: switchOn ? 1 : 0.65,
             }}
-            scroll={{ y: tableBoxHeight }}
+            scroll={{ y: tableBoxHeight - 78 }}
             size='small'
             columns={tableColumns}
             dataSource={rules}
@@ -888,6 +819,8 @@ const App = () => {
           <div style={{
             display: 'flex',
             gap: '10px',
+            height: '100%',
+            overflowY: 'scroll',
           }}>
             <div style={{
               width: 500
@@ -906,7 +839,7 @@ const App = () => {
                   disabled
                   value={currentEditRule?.id || ''}
                 />
-                <Button  type="primary" icon={<CopyOutlined />} onClick={() => {
+                <Button type="primary" icon={<CopyOutlined />} onClick={() => {
                   navigator.clipboard.writeText(currentEditRule?.id || '');
                   message.success('Copied to clipboard');
                 }}></Button>
@@ -951,37 +884,6 @@ const App = () => {
     </Spin>
   )
 
-  return (
-    <div className="ajax-modifier-main" style={{
-      margin: '0 auto',
-      width: '100%',
-      height: '100%',
-      padding: '20px',
-    }}>
-      {renderHeader()}
-      {
-        showAllRules && (
-          <div>
-            <JSONPretty data={rules} />
-            <Divider />
-            <JSONPretty data={dataList} />
-          </div>
-        )
-      }
-      {
-        !showAllRules && (
-          <div className='setting-body' style={{
-            background: '#fff',
-            borderRadius: '8px',
-            padding: '20px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}>
-            {renderTabs()}
-          </div>
-        )
-      }
-    </div>
-  );
 };
 
 const root = createRoot(document.getElementById("root")!);
