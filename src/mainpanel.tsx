@@ -21,6 +21,7 @@ import {
   Drawer,
   Typography,
   Spin,
+  Alert,
 } from 'antd';
 import { MinusOutlined, EditOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, ExportOutlined, CopyOutlined } from '@ant-design/icons';
 import MonacoEditor from './components/Editor/index'
@@ -68,6 +69,7 @@ const App = () => {
   const [switchOn, setSwitchOn] = useState(false);
   const [rules, setRules] = useState<AjaxInterceptorRule[]>([]);
   const [dataList, setDataList] = useState<DataList>({});
+  const [duplicateMatch, setDuplicateMatch] = useState<AjaxInterceptorRule[]>([]);
 
   const tableBoxRef = useRef<HTMLDivElement>(null);
 
@@ -82,8 +84,11 @@ const App = () => {
   }, [tableBoxRef.current]);
 
   const readRulesFromStorage = () => {
-    chrome.storage.local.get(['ajaxInterceptor_rules'], (result) => {
-      setRules(result.ajaxInterceptor_rules || []);
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(['ajaxInterceptor_rules'], (result) => {
+        // setRules(result.ajaxInterceptor_rules || []);
+        resolve(result.ajaxInterceptor_rules as any || []);
+      });
     });
   };
 
@@ -307,12 +312,14 @@ const App = () => {
       setRules(prevRules => {
         const newRules = prevRules.filter(rule => {
           return rule.label.includes(searchName) && rule.match.includes(searchUrl);
-      });
-      console.log('newRules', newRules);
+        });
+        console.log('newRules', newRules);
         return newRules;
       });
     } else {
-      readRulesFromStorage()
+      readRulesFromStorage().then(rules => {
+        setRules(rules as any);
+      });
     }
   }, [searchName, searchUrl]);
 
@@ -618,6 +625,16 @@ const App = () => {
     setShowDetail(true);
   };
 
+  const checkDuplicateMatch = () => {
+    const currentMatch = currentEditRule?.match;
+    readRulesFromStorage().then(rules => {
+      // return duplicate match
+      const duplicateMatch = (rules as any).filter(rule => rule.match === currentMatch);
+      // return duplicateMatch;
+      setDuplicateMatch(duplicateMatch);
+    })
+  };
+
   const tableColumns = [
     {
       title: "id",
@@ -657,7 +674,17 @@ const App = () => {
       ellipsis: true,
       render: (text, record) => (
         <Tooltip placement="topLeft" title={text}>
-          <Button type="link" size="small" onClick={() => handleViewDetail(text, record)}>{text}</Button>
+          <Space.Compact>
+            <Button type="text" icon={<CopyOutlined />} size="small" onClick={() => {
+              // copy match
+              navigator.clipboard.writeText(record.match || '');
+              message.success('Copied to clipboard');
+
+            }}/>
+
+            <Button type="link" size="small" onClick={() => handleViewDetail(text, record)}>{text}</Button>
+
+          </Space.Compact>
         </Tooltip>
       )
     },
@@ -681,17 +708,19 @@ const App = () => {
   };
   const handleUpdateRules = () => {
     if (currentEditRule) {
-      const index = rules.findIndex(rule => rule.id === currentEditRule.id);
-      let newRules = [...rules];
-      if (index !== -1) {
-        newRules[index] = currentEditRule;
-      } else {
-        // new rule
-        newRules.push(currentEditRule);
-      }
-      setRules(newRules);
-      set('ajaxInterceptor_rules', newRules);
-      setShowDetail(false);
+      readRulesFromStorage().then(rules => {
+        const index = (rules as any).findIndex(rule => rule.id === currentEditRule.id);
+        let newRules = [...(rules as any)];
+        if (index !== -1) {
+          newRules[index] = currentEditRule;
+        } else {
+          // new rule
+          newRules.push(currentEditRule);
+        }
+        setRules(newRules);
+        set('ajaxInterceptor_rules', newRules);
+        setShowDetail(false);
+      })
     }
   };
 
@@ -862,6 +891,7 @@ const App = () => {
                 style={{
                   marginBottom: '10px',
                 }}
+                onBlur={checkDuplicateMatch}
                 value={currentEditRule?.match || ''}
                 onChange={(e) => {
                   if (currentEditRule) {
@@ -869,6 +899,9 @@ const App = () => {
                   }
                 }}
               />
+              {duplicateMatch.length > 1 && (
+                <Alert message={`Duplicate match: ${duplicateMatch.length}`} type="error" />
+              )}
             </div>
 
             <JsonEditor
