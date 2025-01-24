@@ -65,6 +65,7 @@ const App = () => {
   const forceUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [, forceUpdate] = useReducer(x => x + 1, 0);
   const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
+  const [isCreating, setIsCreating] = useState(false);
 
   const [switchOn, setSwitchOn] = useState(false);
   const [rules, setRules] = useState<AjaxInterceptorRule[]>([]);
@@ -355,6 +356,7 @@ const App = () => {
   };
 
   const handleAddNewRule = () => {
+    setIsCreating(true);
     const newRule: AjaxInterceptorRule = {
       id: generateUniqueId(),
       match: '',
@@ -625,11 +627,15 @@ const App = () => {
     setShowDetail(true);
   };
 
-  const checkDuplicateMatch = () => {
-    const currentMatch = currentEditRule?.match;
+  const checkDuplicateMatch = (e) => {
+    console.log(e)
+
+    const currentMatch = e.target.value;
     readRulesFromStorage().then(rules => {
+      console.log(rules, currentMatch)
       // return duplicate match
       const duplicateMatch = (rules as any).filter(rule => rule.match === currentMatch);
+      console.log(duplicateMatch)
       // return duplicateMatch;
       setDuplicateMatch(duplicateMatch);
     })
@@ -680,7 +686,7 @@ const App = () => {
               navigator.clipboard.writeText(record.match || '');
               message.success('Copied to clipboard');
 
-            }}/>
+            }} />
 
             <Button type="link" size="small" onClick={() => handleViewDetail(text, record)}>{text}</Button>
 
@@ -817,6 +823,9 @@ const App = () => {
             bordered
             pagination={{
               pageSize: 20,
+              total: rules.length,
+              showTotal: (total, range) => `Total: ${total}`,
+              showSizeChanger: true
             }}
             style={{
               height: tableBoxHeight,
@@ -831,10 +840,12 @@ const App = () => {
         <Drawer
           maskClosable={false}
           width={1200}
-          title="Detail"
+          title={isCreating ? 'Create new rule' : 'Detail for ' + currentEditRule?.label}
           open={showDetail}
           onClose={() => {
             setShowDetail(false);
+            setIsCreating(false);
+            setDuplicateMatch([]);
           }}
           extra={
             <Space>
@@ -899,8 +910,24 @@ const App = () => {
                   }
                 }}
               />
-              {duplicateMatch.length > 1 && (
-                <Alert message={`Duplicate match: ${duplicateMatch.length}`} type="error" />
+              {duplicateMatch.length > 0 && isCreating && (
+                <Collapse
+                  size="small"
+                  defaultActiveKey={['1']}
+                  items={[{
+                    key: '1', label: 'Duplicate match: ' + duplicateMatch.length, children: <>
+                      {duplicateMatch.map(rule => (
+                        <Typography.Text
+                          className='duplicate-match'
+                          key={rule.id} onClick={() => {
+                            setIsCreating(false);
+                            setCurrentEditRule(rule);
+                            setShowDetail(true);
+                          }}>{rule.match}</Typography.Text>
+                      ))}
+                    </>
+                  }]}
+                />
               )}
             </div>
 

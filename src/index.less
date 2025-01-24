@@ -167,9 +167,26 @@
   .ant-pagination {
     // set beautiful shadow on top of the table
     box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-    padding: 6px 0;
+    padding: 6px 10px;
     margin: 0 0 !important;
     position: absolute;
     bottom: 0;
     width: 100%;
+  }
+  .duplicate-match {
+    color: #1677ff;
+    cursor: pointer;
+    white-space: pre-line;
+    width: 100%;
+    text-align: left;
+    padding: 2px 0 6px 0;
+    transition: all 0.3s;
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+  .ant-pagination-total-text{
+    position: absolute;
+    left: 10px;
+    font-weight: bold;
   }
